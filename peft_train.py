@@ -99,6 +99,14 @@ def get_args_parser():
     parser.add_argument("--save_interval", type=int, default=50000)
     parser.add_argument("--log_interval", type=int, default=20)
 
+    # Action space override (for non-default embodiments like rby1)
+    parser.add_argument("--action_mode", type=str, default=None,
+                        help="Override action mode (e.g. 'auto' for joint-space robots)")
+    parser.add_argument("--real_action_dim", type=int, default=None,
+                        help="Real action dimension when action_mode='auto' (e.g. 16 for rby1)")
+    parser.add_argument("--max_action_dim", type=int, default=20,
+                        help="Max action dimension for padding (default: 20)")
+
     # System
     parser.add_argument("--seed", type=int, default=0)
 
@@ -191,8 +199,19 @@ def main(args):
     set_seed(args.seed + accelerator.process_index)
     logger.info(f"Args: {args}")
 
-    # Load model & processor
-    model = XVLA.from_pretrained(args.models)
+    # Load model & processor (with optional action space override)
+    if args.action_mode is not None:
+        from models.configuration_xvla import XVLAConfig
+        config = XVLAConfig.from_pretrained(args.models)
+        config.action_mode = args.action_mode
+        if args.real_action_dim is not None:
+            config.real_action_dim = args.real_action_dim
+        config.max_action_dim = args.max_action_dim
+        logger.info(f"Action space override: mode={config.action_mode}, "
+                     f"real_dim={config.real_action_dim}, max_dim={config.max_action_dim}")
+        model = XVLA.from_pretrained(args.models, config=config)
+    else:
+        model = XVLA.from_pretrained(args.models)
     
     lora_config = LoraConfig(
         lora_alpha=16,

@@ -39,6 +39,14 @@ def main():
                         help="Host address for FastAPI server")
     parser.add_argument("--disable_slurm", action="store_true", default=False)
 
+    # Action space override (for non-default embodiments like rby1)
+    parser.add_argument("--action_mode", type=str, default=None,
+                        help="Override action mode (e.g. 'auto' for joint-space robots)")
+    parser.add_argument("--real_action_dim", type=int, default=None,
+                        help="Real action dimension when action_mode='auto' (e.g. 16 for rby1)")
+    parser.add_argument("--max_action_dim", type=int, default=20,
+                        help="Max action dimension for padding (default: 20)")
+
     args = parser.parse_args()
     os.makedirs(args.output_dir, exist_ok=True)
 
@@ -74,11 +82,27 @@ def main():
     # --------------------------------------------------------------------------
     print("\n📦 Loading XVLA model from pretrained checkpoint...")
     try:
-        model = XVLA.from_pretrained(
-            args.model_path,
-            trust_remote_code=True,
-            torch_dtype=torch.float32
-        ).to(device).to(torch.float32)
+        if args.action_mode is not None:
+            from models.configuration_xvla import XVLAConfig
+            config = XVLAConfig.from_pretrained(args.model_path)
+            config.action_mode = args.action_mode
+            if args.real_action_dim is not None:
+                config.real_action_dim = args.real_action_dim
+            config.max_action_dim = args.max_action_dim
+            print(f"🔸 Action space override: mode={config.action_mode}, "
+                  f"real_dim={config.real_action_dim}, max_dim={config.max_action_dim}")
+            model = XVLA.from_pretrained(
+                args.model_path,
+                config=config,
+                trust_remote_code=True,
+                torch_dtype=torch.float32
+            ).to(device).to(torch.float32)
+        else:
+            model = XVLA.from_pretrained(
+                args.model_path,
+                trust_remote_code=True,
+                torch_dtype=torch.float32
+            ).to(device).to(torch.float32)
         
         if args.LoRA_path is not None:
             print(f"🔸 Applying LoRA weights from {args.LoRA_path} ...")

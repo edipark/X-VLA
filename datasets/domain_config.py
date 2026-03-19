@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 DATA_WEIGHTS = {
+    "rby1": 1.0,
     "robomind-franka": 0.1,
     "robomind-ur": 0.1,
     "Droid-Left": 0.15,
@@ -79,5 +80,8 @@ DATA_DOMAIN_ID = {
     "lift2": 0,
 
     # x2robot
-    "x2robot": 0
+    "x2robot": 0,
+
+    # rby1
+    "rby1": 19
 }
