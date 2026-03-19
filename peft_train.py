@@ -98,6 +98,12 @@ def get_args_parser():
     # Logging / saving
     parser.add_argument("--save_interval", type=int, default=50000)
     parser.add_argument("--log_interval", type=int, default=20)
+    parser.add_argument("--use_wandb", action="store_true", default=False,
+                        help="Enable Weights & Biases logging")
+    parser.add_argument("--wandb_project", type=str, default="X-VLA",
+                        help="WandB project name")
+    parser.add_argument("--wandb_run_name", type=str, default=None,
+                        help="WandB run name (default: output_dir basename)")
 
     # Action space override (for non-default embodiments like rby1)
     parser.add_argument("--action_mode", type=str, default=None,
@@ -187,11 +193,24 @@ def update_group_lrs(optim, step, args):
 # ============================================================
 def main(args):
     output_dir = Path(args.output_dir)
+    log_with = ["tensorboard"]
+    if args.use_wandb:
+        log_with.append("wandb")
     accelerator = Accelerator(
-        log_with="tensorboard", 
+        log_with=log_with,
         project_dir=output_dir
     )
-    accelerator.init_trackers("XVLA-Training")
+    run_name = args.wandb_run_name or output_dir.name
+    init_kwargs = {"tensorboard": {"flush_secs": 30}}
+    if args.use_wandb:
+        # accelerate passes the project_name as wandb `project` internally,
+        # so only pass `name` here to avoid "multiple values for 'project'" error.
+        init_kwargs["wandb"] = {"name": run_name}
+    tracker_project = args.wandb_project if args.use_wandb else "X-VLA"
+    # TensorBoard hparams only support int/float/str/bool — convert everything else to str.
+    _VALID = (int, float, str, bool)
+    safe_config = {k: v if isinstance(v, _VALID) else str(v) for k, v in vars(args).items()}
+    accelerator.init_trackers(tracker_project, config=safe_config, init_kwargs=init_kwargs)
     
     accelerator.wait_for_everyone()
     logger = get_logger(__name__, output_dir=output_dir, accelerator=accelerator)
