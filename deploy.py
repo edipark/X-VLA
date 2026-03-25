@@ -17,11 +17,9 @@
 import argparse
 import os
 import os.path as osp
-import json
 import torch
 from models.modeling_xvla import XVLA
 from models.processing_xvla import XVLAProcessor
-import sys
 
 def main():
     parser = argparse.ArgumentParser(description="Launch XVLA inference FastAPI server")
@@ -29,8 +27,6 @@ def main():
                         help="Path to the pretrained XVLA model directory")
     parser.add_argument('--processor_path', type=str, default=None)
     parser.add_argument('--LoRA_path', type=str, default=None)
-    parser.add_argument("--output_dir", type=str, default="./logs",
-                        help="Directory to save runtime info (info.json)")
     parser.add_argument("--device", type=str, default="cuda",
                         help="Device to load model on (cuda / cpu / auto)")
     parser.add_argument("--port", default=8010, type=int,
@@ -48,11 +44,9 @@ def main():
                         help="Max action dimension for padding (default: 20)")
 
     args = parser.parse_args()
-    os.makedirs(args.output_dir, exist_ok=True)
 
     print("🚀 Starting XVLA Inference Server...")
     print(f"🔹 Model Path  : {args.model_path}")
-    print(f"🔹 Output Dir  : {args.output_dir}")
     print(f"🔹 Device Arg  : {args.device}")
     print(f"🔹 Port        : {args.port}")
 
@@ -140,33 +134,6 @@ def main():
     else:
         print("\n⚠️  No SLURM environment detected, defaulting to 0.0.0.0")
         host = args.host
-
-    # --------------------------------------------------------------------------
-    # Write info.json for bookkeeping (safe version)
-    # --------------------------------------------------------------------------
-    info_path = osp.join(args.output_dir, "info.json")
-    infos = {
-        "host": host,
-        "port": args.port,
-        "job_id": job_id,
-        "node_list": node_list or "none",
-    }
-
-    # --- Check existence before writing ---
-    if osp.exists(info_path):
-        print(f"❌ Error: {info_path} already exists. "
-            f"This usually means another server is still running or the previous job did not clean up properly.")
-        print("👉 Please remove it manually or use a different --output_dir.")
-        sys.exit(1)
-
-    # --- Write safely ---
-    try:
-        with open(info_path, "w") as f:
-            json.dump(infos, f, indent=4)
-        print(f"📝 Server info written to {info_path}")
-    except Exception as e:
-        print(f"⚠️ Failed to write {info_path}: {e}")
-        sys.exit(1)
 
     # --------------------------------------------------------------------------
     # Launch FastAPI server
