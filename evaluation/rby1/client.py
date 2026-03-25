@@ -21,6 +21,11 @@ class XVLARby1Client:
     MODEL_DIM = 20
     DOMAIN_ID = 19
 
+    # Must match datasets/domain_handler/rby1.py used during training.
+    # Indices 0–13 are trained as delta (action - proprio); 14–15 are absolute.
+    IDX_FOR_DELTA = list(range(14))
+    IDX_FOR_MASK_PROPRIO = [14, 15]
+
     def __init__(
         self,
         host: str = "localhost",
@@ -42,7 +47,11 @@ class XVLARby1Client:
         instruction: str,
         steps: int = 10,
     ) -> np.ndarray:
-        """Run one inference call and return *trimmed* 16-D actions.
+        """Run one inference call and return **absolute** 16-D actions.
+
+        The model outputs *delta* actions for indices 0–13 (matching training).
+        This method converts them back to absolute joint targets by adding the
+        current proprio, so the caller can send them directly to the robot.
 
         Parameters
         ----------
@@ -58,11 +67,16 @@ class XVLARby1Client:
         Returns
         -------
         np.ndarray
-            Action trajectory of shape ``(T, 16)`` — already trimmed from the
-            model's 20-D output.
+            Action trajectory of shape ``(T, 16)`` — **absolute** joint targets.
         """
+        proprio_16d = np.asarray(proprio_16d, dtype=np.float32)
         proprio_20d = np.zeros(self.MODEL_DIM, dtype=np.float32)
-        proprio_20d[: self.REAL_DIM] = np.asarray(proprio_16d, dtype=np.float32)
+        proprio_20d[: self.REAL_DIM] = proprio_16d.copy()
+
+        # Mask proprio indices that were masked during training
+        for idx in self.IDX_FOR_MASK_PROPRIO:
+            if idx < self.REAL_DIM:
+                proprio_20d[idx] = 0.0
 
         payload = {
             "domain_id": self.domain_id,
@@ -80,7 +94,14 @@ class XVLARby1Client:
 
         if action.ndim == 1:
             action = action.reshape(-1, self.MODEL_DIM)
-        return action[:, : self.REAL_DIM]
+        action = action[:, : self.REAL_DIM]
+
+        # Convert delta → absolute for the indices that were delta-trained
+        for idx in self.IDX_FOR_DELTA:
+            if idx < self.REAL_DIM:
+                action[:, idx] += float(proprio_16d[idx])
+
+        return action
 
     # ------------------------------------------------------------------
     # Helpers
@@ -91,14 +112,11 @@ class XVLARby1Client:
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Split a 16-D action vector into per-limb components.
 
-        Layout (matches the training dataset):
-            [0:7]   right arm joints
-            [7]     right gripper
-            [8:15]  left arm joints  (index 7:14 from 0-based 16-D)
-            [15]    left gripper     (index 14:16 from 0-based 16-D)
-
-        Note: The actual rby1 dataset layout is:
-            right_arm(7) + right_gripper(1) + left_arm(7) + left_gripper(1)
+        Layout (matches the training dataset assembled in data_conversion.ipynb):
+            [0:7]   right arm joints   (robot_target_joints[8:15])
+            [7:14]  left arm joints    (robot_target_joints[15:22])
+            [14]    right gripper      (gripper_target[0])
+            [15]    left gripper       (gripper_target[1])
 
         Returns
         -------
@@ -108,7 +126,7 @@ class XVLARby1Client:
         left_grip    : np.ndarray  shape ``(...,)``
         """
         a = np.asarray(action_16d)
-        return a[..., 0:7], a[..., 7], a[..., 8:15], a[..., 15]
+        return a[..., 0:7], a[..., 14], a[..., 7:14], a[..., 15]
 
     def health_check(self) -> bool:
         """Return ``True`` if the server is reachable (simple GET)."""
