@@ -12,8 +12,9 @@ class RBY1Handler(DomainHandler):
     Domain handler for Rainbow Robotics RBY1 dual-arm mobile manipulator.
 
     Dataset format: LeRobot v2.1 with images embedded in parquet (no MP4 videos).
-    Action: 16D (right 7 joints + right gripper + left 7 joints + left gripper)
-    State:  16D (14 arm joints + 2 grippers)
+    Action: 16D  [0:7]=right arm joints, [7:14]=left arm joints,
+                 [14]=right gripper, [15]=left gripper
+    State:  16D  same layout; gripper indices (14,15) are masked to 0 during training.
     Cameras: head_image, left_wrist_image, right_wrist_image (CHW uint8, 224x224)
     """
 
