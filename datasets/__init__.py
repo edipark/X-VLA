@@ -28,10 +28,11 @@ def create_dataloader(batch_size: int,
                       metas_path: str, 
                       num_actions: int,
                       training: bool,
-                      action_mode: str
+                      action_mode: str,
+                      num_episodes: int = None,
                       ):
     return DataLoader(
-        InfiniteDataReader(metas_path, num_actions=num_actions, training=training, action_mode = action_mode),
+        InfiniteDataReader(metas_path, num_actions=num_actions, training=training, action_mode=action_mode, num_episodes=num_episodes),
         batch_size=batch_size,
         num_workers=4,
         pin_memory=True,

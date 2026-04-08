@@ -105,6 +105,10 @@ def get_args_parser():
     parser.add_argument("--wandb_run_name", type=str, default=None,
                         help="WandB run name (default: output_dir basename)")
 
+    # Data limiting
+    parser.add_argument("--num_episodes", type=int, default=None,
+                        help="Limit the number of episodes used for training (default: use all)")
+
     # Action space override (for non-default embodiments like rby1)
     parser.add_argument("--action_mode", type=str, default=None,
                         help="Override action mode (e.g. 'auto' for joint-space robots)")
@@ -254,6 +258,7 @@ def main(args):
         num_actions=model.num_actions,
         action_mode=model.action_mode,
         training=True,
+        num_episodes=args.num_episodes,
     )
 
     # Optimizer

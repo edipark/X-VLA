@@ -44,11 +44,13 @@ class InfiniteDataReader(IterableDataset):
                  training: bool = True,
                  action_mode: str = "ee6d",
                  lang_aug: str = None,
+                 num_episodes: int = None,
                  ):
         self.num_views = num_views
         self.training = training
         self.num_actions = num_actions
         self.action_mode = action_mode
+        self.num_episodes = num_episodes
         self.metas: Dict[str, dict] = {}
         print("use action mode:", action_mode)
         if fileio.isdir(metas_path):
@@ -61,6 +63,8 @@ class InfiniteDataReader(IterableDataset):
             with io.BytesIO(fileio.get(file_path)) as f: meta = json.load(f)
             ### General Style
             if 'dataset_name' in meta.keys() and 'datalist' in meta.keys():
+                if num_episodes is not None:
+                    meta['datalist'] = meta['datalist'][:num_episodes]
                 print(f"== dataset {meta['dataset_name']} with {len(meta['datalist'])} trajs")
                 self.metas[meta["dataset_name"]] = meta
             ### Lerobot v2.1 style
@@ -69,8 +73,10 @@ class InfiniteDataReader(IterableDataset):
                 if "root_path" not in meta.keys(): meta['root_path'] = "/".join(file_path.split("/")[:-2])
                 with io.BytesIO(fileio.get(fileio.join_path("/".join(file_path.split("/")[:-1]), "episodes.jsonl"))) as f:
                     for line in f: meta['datalist'].append(json.loads(line.decode("utf-8")))
+                if num_episodes is not None:
+                    meta['datalist'] = meta['datalist'][:num_episodes]
                 self.metas[meta['root_path']] = meta
-                print(f"== lerobot dataset {meta['robot_type']} with {meta['total_episodes']} trajs at {meta['root_path']}====")
+                print(f"== lerobot dataset {meta['robot_type']} with {len(meta['datalist'])} trajs at {meta['root_path']}====")
             else: raise NotImplementedError(f"unrecognized meta file format: {file}")
 
         self.image_aug = [

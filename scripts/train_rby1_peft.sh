@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=PuttingCupintotheDish_demo300
+#SBATCH --job-name=PuttingCupintotheDish_demo50
 #SBATCH --partition=gigabyte_a6000
 #SBATCH --gres=gpu:1
 #SBATCH --time=36:00:00
@@ -60,15 +60,16 @@ accelerate launch --mixed_precision bf16 peft_train.py \
     --learning_rate 1e-4 \
     --learning_coef 1.0 \
     --weight_decay 0.0 \
-    --iters 1000000 \
+    --iters 50000 \
     --freeze_steps 1000 \
     --warmup_steps 2000 \
-    --save_interval 50000 \
+    --save_interval 10000 \
     --log_interval 20 \
     --use_wandb \
     --wandb_project "X-VLA" \
     --wandb_run_name "${SLURM_JOB_NAME}" \
     --seed 42 \
+    --num_episodes 50 \
     "$@"
 
 echo "=============================="
