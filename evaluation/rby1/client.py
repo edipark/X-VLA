@@ -31,9 +31,14 @@ class XVLARby1Client:
         host: str = "localhost",
         port: int = 8010,
         domain_id: int = DOMAIN_ID,
+        rtc_enabled: bool = False,
+        rtc_config: dict | None = None,
     ) -> None:
         self.url = f"http://{host}:{port}/act"
+        self._base_url = f"http://{host}:{port}"
         self.domain_id = domain_id
+        self.rtc_enabled = rtc_enabled
+        self.rtc_config = rtc_config
 
     # ------------------------------------------------------------------
     # Core inference
@@ -46,6 +51,7 @@ class XVLARby1Client:
         proprio_16d: np.ndarray,
         instruction: str,
         steps: int = 10,
+        execute_chunk_size: int | None = None,
     ) -> np.ndarray:
         """Run one inference call and return **absolute** 16-D actions.
 
@@ -63,6 +69,9 @@ class XVLARby1Client:
             Natural-language task description.
         steps : int
             Number of action steps to predict (server default is 10).
+        execute_chunk_size : int | None
+            How many steps were executed from the previous chunk (for RTC).
+            Only sent when ``self.rtc_enabled`` is True.
 
         Returns
         -------
@@ -87,6 +96,14 @@ class XVLARby1Client:
             "image2": json_numpy.dumps(np.asarray(right_img, dtype=np.uint8)),
             "steps": steps,
         }
+
+        # RTC fields (only when enabled)
+        if self.rtc_enabled:
+            payload["rtc_enabled"] = True
+            if self.rtc_config is not None:
+                payload["rtc_config"] = self.rtc_config
+            if execute_chunk_size is not None:
+                payload["execute_chunk_size"] = execute_chunk_size
 
         resp = requests.post(self.url, json=payload, timeout=30)
         resp.raise_for_status()
@@ -128,11 +145,18 @@ class XVLARby1Client:
         a = np.asarray(action_16d)
         return a[..., 0:7], a[..., 14], a[..., 7:14], a[..., 15]
 
+    def reset_rtc(self) -> bool:
+        """Reset server-side RTC state (call between episodes)."""
+        try:
+            resp = requests.post(f"{self._base_url}/rtc_reset", timeout=5)
+            return resp.status_code == 200
+        except Exception:
+            return False
+
     def health_check(self) -> bool:
         """Return ``True`` if the server is reachable (simple GET)."""
         try:
-            base = self.url.rsplit("/", 1)[0]
-            resp = requests.get(base + "/docs", timeout=5)
+            resp = requests.get(f"{self._base_url}/docs", timeout=5)
             return resp.status_code == 200
         except Exception:
             return False

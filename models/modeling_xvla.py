@@ -34,6 +34,7 @@ from .modeling_florence2 import Florence2ForConditionalGeneration
 from .transformer import SoftPromptedTransformer
 from .action_hub import build_action_space
 from .configuration_xvla import XVLAConfig
+from .rtc_xvla import XVLARTCConfig, XVLARTCProcessor
 
 
 class XVLA(PreTrainedModel):
@@ -187,10 +188,16 @@ class XVLA(PreTrainedModel):
         domain_id: torch.LongTensor,
         proprio: torch.Tensor,
         steps: int = 10,
+        prev_chunk_left_over: torch.Tensor | None = None,
+        rtc_config: XVLARTCConfig | None = None,
     ) -> torch.Tensor:
         """
         Iterative denoising (linear schedule).
         Applies action_space.postprocess at the end (e.g., sigmoid on gripper).
+
+        When *prev_chunk_left_over* is provided together with *rtc_config*,
+        Real-Time Chunking (RTC) guidance is applied at every denoising step
+        to align the new chunk's prefix with the previous chunk's tail.
         """
         self.eval()
         enc = self.forward_vlm(input_ids, image_input, image_mask)
@@ -200,6 +207,11 @@ class XVLA(PreTrainedModel):
 
         x1 = torch.randn(B, self.num_actions, D, device=proprio.device, dtype=proprio.dtype)
         action = torch.zeros_like(x1)
+
+        # RTC processor (created once, used every step)
+        rtc_proc = None
+        if prev_chunk_left_over is not None and rtc_config is not None and rtc_config.enabled:
+            rtc_proc = XVLARTCProcessor(rtc_config)
 
         steps = max(1, int(steps))
         for i in range(steps, 0, -1):
@@ -213,6 +225,16 @@ class XVLA(PreTrainedModel):
                 t=t,
                 **enc,
             )
+
+            # Apply RTC guidance on the predicted x0 (action)
+            if rtc_proc is not None:
+                action = rtc_proc.guide_prediction(
+                    action, prev_chunk_left_over, time_value=float(i / steps)
+                )
+
+        # Store raw action (pre-postprocess) for RTC continuity across chunks
+        self._last_raw_action = action.clone().detach()
+
         return self.action_space.postprocess(action)
 
     # =============================== FastAPI service =============================
@@ -226,6 +248,10 @@ class XVLA(PreTrainedModel):
         """
         if self.app is not None:
             return
+
+        # Server-side RTC state (persists across requests within one episode)
+        self._prev_raw_action = None
+        self._prev_proprio = None
 
         app = FastAPI()
 
@@ -276,12 +302,55 @@ class XVLA(PreTrainedModel):
 
                 # Inference
                 steps = int(payload.get("steps", 10))
-                action = self.generate_actions(**inputs, steps=steps).squeeze(0).float().cpu().numpy()
+
+                # --- RTC handling ---
+                rtc_enabled = payload.get("rtc_enabled", False)
+                rtc_kwargs = {}
+                if rtc_enabled:
+                    rtc_cfg = XVLARTCConfig.from_dict(payload.get("rtc_config"))
+                    rtc_cfg.enabled = True
+                    rtc_kwargs["rtc_config"] = rtc_cfg
+
+                    if self._prev_raw_action is not None:
+                        exec_size = int(payload.get("execute_chunk_size", 0))
+                        if exec_size > 0 and exec_size < self._prev_raw_action.shape[1]:
+                            prev_tail = self._prev_raw_action[:, exec_size:, :]
+                            # Adjust delta references: the previous raw actions
+                            # are deltas relative to the OLD proprio.  Convert
+                            # to deltas relative to the NEW proprio so RTC
+                            # guidance targets the correct absolute positions.
+                            #   absolute = old_delta + old_proprio
+                            #   new_delta = absolute - new_proprio
+                            #            = old_delta + (old_proprio - new_proprio)
+                            if self._prev_proprio is not None:
+                                pdiff = (self._prev_proprio - inputs["proprio"]).unsqueeze(1)
+                                prev_tail = prev_tail + pdiff
+                            rtc_kwargs["prev_chunk_left_over"] = prev_tail
+                        else:
+                            rtc_kwargs["prev_chunk_left_over"] = None
+
+                action = self.generate_actions(**inputs, steps=steps, **rtc_kwargs)
+
+                # Store raw action for next RTC call (before postprocess was
+                # already applied inside generate_actions, but _last_raw_action
+                # was saved pre-postprocess)
+                if rtc_enabled and hasattr(self, "_last_raw_action"):
+                    self._prev_raw_action = self._last_raw_action
+                    self._prev_proprio = inputs["proprio"].clone().detach()
+
+                action = action.squeeze(0).float().cpu().numpy()
                 return JSONResponse({"action": action.tolist()})
 
             except Exception:
                 logging.error(traceback.format_exc())
                 return JSONResponse({"error": "Request failed"}, status_code=400)
+
+        @app.post("/rtc_reset")
+        def rtc_reset():
+            """Clear server-side RTC state (call between episodes)."""
+            self._prev_raw_action = None
+            self._prev_proprio = None
+            return JSONResponse({"status": "ok"})
 
         self.app = app
 
